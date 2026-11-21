@@ -128,6 +128,11 @@ function requireHandinDirs(root: string): { appDir: string; shotsDir: string } {
     fail(`screenshots/ holds ${shots.length} images: the gate wants 3 or 4`);
   }
   for (const shot of shots) {
+    const dot = shot.name.lastIndexOf(".");
+    const ext = dot >= 0 ? shot.name.slice(dot).toLowerCase() : "";
+    if (![".jpg", ".jpeg", ".png", ".webp"].includes(ext)) {
+      fail(`screenshots/${shot.name} is not an image file (jpg, png, or webp): the gate reads screenshots as images`);
+    }
     const size = lstatSync(join(shotsDir, shot.name)).size;
     if (size > SCREENSHOT_LIMITS.max_bytes) {
       fail(`screenshots/${shot.name} is ${size} bytes, over the 256 KiB cap`);
@@ -180,6 +185,13 @@ function handInEntry(): void {
   const { appDir, shotsDir } = requireHandinDirs(root);
   const appFiles = countPlainFiles(appDir);
   const appBytes = sumPlainFileBytes(appDir);
+  // The gate caps the app's size: fail here, before copying, not later.
+  if (appFiles > APP_LIMITS.app_max_files) {
+    fail(`app/ holds ${appFiles} files, over the ${APP_LIMITS.app_max_files} cap`);
+  }
+  if (appBytes > APP_LIMITS.app_max_bytes) {
+    fail(`app/ is ${formatByteCount(appBytes)}, over the ${formatByteCount(APP_LIMITS.app_max_bytes)} cap`);
+  }
   const shotNames = readdirSync(shotsDir, { withFileTypes: true })
     .filter((e) => e.isFile() && !e.name.startsWith("."))
     .map((e) => e.name)
