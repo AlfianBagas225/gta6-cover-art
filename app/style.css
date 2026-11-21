@@ -1,5 +1,7 @@
 /* Palm Sunset Cover Studio — dark editor chrome around a bright cover.
-   Display fonts are vendored under ./fonts/ (SIL Open Font License). */
+   Display fonts are vendored under ./fonts/ (SIL Open Font License).
+   Round 2: rebuilt live in a fresh recorded session; the lettering polish
+   lives in app/src/cover.js (bigger title, outlined subtitle, deeper scrim). */
 @font-face {
   font-family: Anton;
   src: url('./fonts/Anton-Regular.ttf') format('truetype');
