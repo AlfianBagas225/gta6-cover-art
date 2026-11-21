@@ -6,6 +6,8 @@
 
 Palm Sunset Cover Studio — an offline, GTA 6-style cover-art maker. Pick from 6 multi-panel layouts, grade with 5 sunset and neon looks, drag/zoom/crop each panel, edit captions, and export PNG covers at 1080×1080, 1080×1350, or 1920×1080. All art is original — no Rockstar assets.
 
+Round 2 polish: the cover lettering now stays readable at small sizes — a larger title, an outlined subtitle, and a deeper scrim behind the words, so the cover still reads at ~300 px wide.
+
 ## Run it
 
 ```sh

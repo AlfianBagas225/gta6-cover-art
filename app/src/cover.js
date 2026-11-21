@@ -1,12 +1,18 @@
-// Palm Sunset Cover Studio — the cover engine.
+// Palm Sunset Cover Studio — the cover engine (round 2).
 //
-// Draws a GTA-poster-style multi-panel cover onto any 2D canvas from a plain
-// state object: pick a layout, a colour grade and a caption, and the engine
-// composes the panels, the lettering, the grain and the vignette. The same
-// function renders the live preview and the exported PNG, so what you see is
-// exactly what you share. No Rockstar art, logo or font is used anywhere:
-// the lettering is Anton, Pacifico and Bebas Neue, all under the SIL Open
-// Font License, vendored under app/fonts/.
+// Draws a GTA-poster-style multi-panel cover onto any 2D canvas from a
+// plain state object: pick a layout, a colour grade and a caption, and the
+// engine composes the panels, the lettering, the grain and the vignette.
+// The same function renders the live preview and the exported PNG, so what
+// you see is exactly what you share. No Rockstar art, logo or font is used
+// anywhere: the lettering is Anton, Pacifico and Bebas Neue, all under the
+// SIL Open Font License, vendored under app/fonts/.
+//
+// Round 2 polish — title legibility at small sizes: the title now starts
+// larger (0.60 of its zone instead of 0.52), the subtitle carries the same
+// dark outline as the title, and the scrim behind the lettering is deeper
+// (0.86 instead of 0.78), so the words still read when the cover is shown
+// at ~300 px wide.
 
 export const LAYOUTS = {
   'hero-trio': {
@@ -150,7 +156,7 @@ export function defaultCoverState() {
     panels: Array.from({ length: 8 }, (_, i) => ({
       photo: i % 2,
       zoom: 1.12 + (i % 3) * 0.09,
-      ox: (i % 2 === 0 ? -0.04 : 0.04),
+      ox: i % 2 === 0 ? -0.04 : 0.04,
       oy: 0,
     })),
   };
@@ -216,7 +222,10 @@ function applyGradeWashes(ctx, grade, w, h) {
   }
 }
 
-/** Fits a one-line title into its zone and draws it with outline + fill. */
+/** Fits a one-line title into its zone and draws it with outline + fill.
+ * Round 2: the title starts at 0.60 of the zone height (was 0.52) and the
+ * scrim behind it is deeper (0.86, was 0.78); the subtitle now gets the
+ * same dark outline as the title instead of a soft shadow alone. */
 function drawTitleBlock(ctx, state, zone, w, h) {
   const grade = GRADES[state.grade];
   const zx = zone.x * w;
@@ -236,7 +245,7 @@ function drawTitleBlock(ctx, state, zone, w, h) {
   } else if (state.titlePos === 'bottom' || !zone.block) {
     const scrim = ctx.createLinearGradient(0, zy - zh * 0.35, 0, zy + zh);
     scrim.addColorStop(0, 'rgba(12,6,24,0)');
-    scrim.addColorStop(1, 'rgba(12,6,24,0.78)');
+    scrim.addColorStop(1, 'rgba(12,6,24,0.86)');
     ctx.fillStyle = scrim;
     ctx.fillRect(0, zy - zh * 0.35, w, zy + zh - (zy - zh * 0.35));
   }
@@ -247,7 +256,7 @@ function drawTitleBlock(ctx, state, zone, w, h) {
 
   if (title) {
     const family = state.titleFont === 'bebas' ? '"Bebas Neue"' : 'Anton';
-    let size = zh * (subtitle ? 0.52 : 0.68);
+    let size = zh * (subtitle ? 0.6 : 0.72);
     ctx.font = `${size}px ${family}`;
     while (ctx.measureText(title).width > zw * 0.96 && size > 10) {
       size -= 2;
@@ -278,17 +287,22 @@ function drawTitleBlock(ctx, state, zone, w, h) {
   if (subtitle) {
     // The subtitle shrinks to fit its zone, like the title: a long line in
     // a narrow title block (the mosaic's centre cell) must never spill over
-    // the neighbouring photos.
-    let size = Math.max(12, zh * 0.22);
+    // the neighbouring photos. Round 2: it also gets a dark outline, so the
+    // script lettering stays readable over bright sand and sky.
+    let size = Math.max(14, zh * 0.22);
     ctx.font = `${size}px Pacifico, cursive`;
     while (ctx.measureText(subtitle).width > zw * 0.96 && size > 10) {
       size -= 2;
       ctx.font = `${size}px Pacifico, cursive`;
     }
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(2, size * 0.08);
+    ctx.strokeStyle = 'rgba(16,6,26,0.85)';
+    const sy = zy + zh * (title ? 0.74 : 0.5);
+    ctx.strokeText(subtitle, alignX, sy);
     ctx.fillStyle = grade.script;
     ctx.shadowColor = 'rgba(0,0,0,0.5)';
     ctx.shadowBlur = size * 0.25;
-    const sy = zy + zh * (title ? 0.74 : 0.5);
     ctx.fillText(subtitle, alignX, sy);
     ctx.shadowBlur = 0;
   }

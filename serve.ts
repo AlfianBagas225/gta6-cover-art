@@ -1,12 +1,12 @@
-// A tiny static server for app/ (Node 22, standard library only), so the
-// cover maker can be tried locally without a build step: `node serve.ts`
-// serves app/ on http://localhost:8080 (or --port <n>). It sends the MIME
-// types an offline web app needs — HTML, modules, CSS, sample photos and the
-// vendored TTF fonts — refuses any path outside app/, and otherwise does
-// nothing clever: a development convenience, not a web server for the
-// internet. Palm Sunset Cover Studio's editor loads its fonts and samples
-// from these same routes, so a 404 here shows up at once as a missing font
-// or a blank panel while testing.
+// A tiny static server for app/ (round 2, Node 22, standard library
+// only), so the cover maker can be tried locally without a build step:
+// `node serve.ts` serves app/ on http://localhost:8080 (or --port <n>).
+// It sends the MIME types an offline web app needs — HTML, modules, CSS,
+// sample photos and the vendored TTF fonts — refuses any path outside app/,
+// and otherwise does nothing clever: a development convenience, not a web
+// server for the internet. Palm Sunset Cover Studio's editor loads its
+// fonts and samples from these same routes, so a 404 here shows up at once
+// as a missing font or a blank panel while testing.
 import { createReadStream, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';

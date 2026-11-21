@@ -1,6 +1,6 @@
-// Fixed scenes for screenshots: ?shot=cover shows one exported cover full
-// frame (the app's own drawing, at the size the query names), ?shot=editor
-// shows the editor with a photo loaded. `photo` picks a sample
+// Fixed scenes for screenshots (round 2): ?shot=cover shows one exported
+// cover full frame (the app's own drawing, at the size the query names),
+// ?shot=editor shows the editor with a photo loaded. `photo` picks a sample
 // (samples/<photo>.jpg) or `both`; `caption` and `subtitle` the words;
 // `layout`, `grade`, `size` (WxH) and `stars` shape the cover.
 // window.__shotReady is set once the cover is painted and the fonts are in.

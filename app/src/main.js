@@ -1,4 +1,4 @@
-// Palm Sunset Cover Studio — the editor.
+// Palm Sunset Cover Studio — the editor (round 2).
 //
 // Wires the page: photos in, layout and grade picked, caption typed, panels
 // dragged and zoomed on the live preview, PNG out in three post sizes. The

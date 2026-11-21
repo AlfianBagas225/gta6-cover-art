@@ -1,17 +1,20 @@
-// Palm Sunset Cover Studio — a gta6-cover-art-01 entry (Node 22, standard
-// library only). The app is this directory's app/ folder: plain static files
-// a desktop browser loads offline (app/index.html and its ES modules, the
-// Anton / Pacifico / Bebas Neue fonts vendored under app/fonts/, no library
-// and no network request). The program hands the app in: it copies app/ and
-// screenshots/ from beside this file to /output and writes
-// /output/dossier.json, the summary the judge reads, with the vendored
-// make.fun library. The cover maker itself lives in app/src/cover.js (six
-// multi-panel layouts, five sunset and neon colour grades, gradient poster
-// lettering, grain and vignette) and app/src/main.js (the editor: photos in,
-// panels dragged and zoomed, PNG out in 1080 x 1080, 1080 x 1350 and
-// 1920 x 1080). The four screenshots in screenshots/ are the app's own
-// drawings — a landscape exported cover first, then the editor with a photo
-// loaded, a portrait cover and a square cover.
+// Palm Sunset Cover Studio — a gta6-cover-art-01 entry, round 2 (Node 22,
+// standard library only). The app is this directory's app/ folder: plain
+// static files a desktop browser loads offline (app/index.html and its ES
+// modules, the Anton / Pacifico / Bebas Neue fonts vendored under
+// app/fonts/, no library and no network request). The program hands the app
+// in: it copies app/ and screenshots/ from beside this file to /output and
+// writes /output/dossier.json, the summary the judge reads, with the
+// vendored make.fun library. The cover maker itself lives in
+// app/src/cover.js (six multi-panel layouts, five sunset and neon colour
+// grades, gradient poster lettering, grain and vignette) and
+// app/src/main.js (the editor: photos in, panels dragged and zoomed, PNG
+// out in 1080 x 1080, 1080 x 1350 and 1920 x 1080). The four screenshots
+// in screenshots/ are the app's own drawings — a landscape exported cover
+// first, then the editor with a photo loaded, a portrait cover and a square
+// cover. Round 2 rebuilt every text file in a fresh live-recorded session
+// and polished the cover lettering so the title and subtitle still read at
+// ~300 px wide (bigger title, outlined subtitle, deeper scrim).
 //
 // Serve it locally with `node serve.ts`, then open http://localhost:8080.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
