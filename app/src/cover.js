@@ -1,7 +1,7 @@
 // Palm Sunset Cover Studio — the cover painter.
 //
 // This module turns a plain state object into a finished poster on any 2D
-// canvas: six multi-panel compositions, five colour grades, poster
+// canvas: seven multi-panel compositions, six colour grades, poster
 // lettering with a sunset gradient, plus grain and a vignette. The live
 // preview and the exported PNG both go through this one painter, so the
 // preview is exactly what gets shared.
@@ -10,6 +10,11 @@
 // Bebas Neue (SIL Open Font License, vendored under app/fonts/), and no
 // Rockstar artwork, logo or typeface appears anywhere.
 //
+// Two of the compositions are worth a note. NEON GRID slots the title
+// into the middle row of a photo grid, and the VHS grade is a retro
+// treatment — scanlines, a red/cyan channel split and tracking bands —
+// layered over the finished cover after the grain.
+//
 // Lettering legibility: the title opens at 0.60 of its zone height, the
 // subtitle carries the same dark outline as the title, and the scrim behind
 // the words reaches 0.86 — so a cover still reads when it is shown about
@@ -17,9 +22,9 @@
 
 const clampNum = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
-/** Six compositions. A cell is a fraction of the cover — left, top, width,
+/** Seven compositions. A cell is a fraction of the cover — left, top, width,
  * height, an optional tilt in degrees — and `isTitle` marks the title
- * block of the mosaic. `zone` is where the lettering lives, `anchor` how
+ * block of a mosaic. `zone` is where the lettering lives, `anchor` how
  * it lines up, and `backdrop` means the cover gets a sunset sky behind
  * the panels instead of a plain background. */
 export const COVER_LAYOUTS = {
@@ -88,11 +93,31 @@ export const COVER_LAYOUTS = {
     ],
     zone: { left: 1 / 3, top: 1 / 3, width: 1 / 3, height: 1 / 3, anchor: 'center', isBlock: true },
   },
+  'neon-grid': {
+    name: 'Neon Grid',
+    blurb: 'A photo grid with the title slotted into the middle row',
+    cells: [
+      { left: 0, top: 0, width: 1 / 3, height: 0.34 },
+      { left: 1 / 3, top: 0, width: 1 / 3, height: 0.34 },
+      { left: 2 / 3, top: 0, width: 1 / 3, height: 0.34 },
+      { isTitle: true },
+      { left: 2 / 3, top: 0.34, width: 1 / 3, height: 0.32 },
+      { left: 0, top: 0.66, width: 1 / 3, height: 0.34 },
+      { left: 1 / 3, top: 0.66, width: 1 / 3, height: 0.34 },
+      { left: 2 / 3, top: 0.66, width: 1 / 3, height: 0.34 },
+    ],
+    // The title block takes the left two-thirds of the middle row, so the
+    // words sit inside the grid instead of floating over the photos.
+    zone: { left: 0, top: 0.34, width: 2 / 3, height: 0.32, anchor: 'left', isBlock: true },
+  },
 };
 
-/** Five colour grades. `cssFilter` runs on each photo as it is drawn;
+/** Six colour grades. `cssFilter` runs on each photo as it is drawn;
  * `washes` are translucent gradients laid over the whole cover after the
- * panels, and `accent` / `scriptInk` colour the title and subtitle. */
+ * panels, and `accent` / `scriptInk` colour the title and subtitle.
+ * A grade with `fx: 'vhs'` gets the retro treatment on top — scanlines,
+ * a channel split and tracking bands, applied in paintCover after the
+ * grain, so the effect covers the lettering as well as the photos. */
 export const COLOR_GRADES = {
   sunset: {
     name: 'Sunset',
@@ -141,6 +166,16 @@ export const COLOR_GRADES = {
       { mode: 'soft-light', stops: [[0, 'rgba(255,255,255,0.08)'], [1, 'rgba(0,0,0,0.3)']] },
     ],
   },
+  vhs: {
+    name: 'VHS',
+    cssFilter: 'saturate(1.25) contrast(1.08) brightness(1.06) sepia(0.14)',
+    accent: '#ff5d8f',
+    scriptInk: '#dff3ff',
+    fx: 'vhs',
+    washes: [
+      { mode: 'soft-light', stops: [[0, 'rgba(90,140,255,0.12)'], [1, 'rgba(255,45,85,0.16)']] },
+    ],
+  },
 };
 
 /** The three export sizes the editor offers. */
@@ -167,6 +202,7 @@ export function freshState() {
     title: 'NEON SHORE',
     subtitle: 'a vice coast story',
     titleFace: 'anton',
+    titleStyle: 'gradient',
     titleSpot: 'bottom',
     titleSunset: true,
     showFrames: true,
@@ -249,10 +285,28 @@ function fitLine(ctx, text, family, startPx, maxPx) {
   return px;
 }
 
+/** Draws one line with a dark outline and an optional fill. `fill` may be
+ * a colour, a gradient, or null for outline-only lettering — the stroke
+ * is drawn thicker when there is no fill, so bare outlines still read. */
+function drawOutlinedText(ctx, text, x, y, px, fill) {
+  ctx.lineWidth = Math.max(2, px * (fill ? 0.07 : 0.12));
+  ctx.strokeStyle = 'rgba(16,6,26,0.9)';
+  ctx.strokeText(text, x, y);
+  if (!fill) return;
+  ctx.fillStyle = fill;
+  ctx.shadowColor = 'rgba(0,0,0,0.45)';
+  ctx.shadowBlur = px * 0.12;
+  ctx.shadowOffsetY = px * 0.03;
+  ctx.fillText(text, x, y);
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+}
+
 /** Fits the title and subtitle into their zone and draws them with an
  * outline and a fill. The title opens at 0.60 of the zone height and the
  * scrim behind the words reaches 0.86, so the lettering still reads when
- * the cover is shown small. */
+ * the cover is shown small. The title fill follows `titleStyle`:
+ * a sunset gradient, solid white, or bare outline. */
 function paintLettering(ctx, state, zone, w, h) {
   const grade = COLOR_GRADES[state.grade] ?? COLOR_GRADES.sunset;
   const zx = zone.left * w;
@@ -286,24 +340,22 @@ function paintLettering(ctx, state, zone, w, h) {
     const face = state.titleFace === 'bebas' ? '"Bebas Neue"' : 'Anton';
     const px = fitLine(ctx, title, face, zh * (subtitle ? 0.6 : 0.72), zw * 0.96);
     const ty = zy + zh * (subtitle ? 0.36 : 0.5);
-    ctx.lineWidth = Math.max(2, px * 0.07);
-    ctx.strokeStyle = 'rgba(16,6,26,0.9)';
-    ctx.strokeText(title, anchorX, ty);
-    if (state.titleSunset) {
+    // The fill is picked per style: a sunset gradient by default, solid
+    // white when the gradient is off, and nothing at all for outline
+    // lettering — the thicker stroke carries those words on its own.
+    let fill = null;
+    if (state.titleStyle === 'outline') {
+      fill = null;
+    } else if (state.titleStyle === 'solid' || !state.titleSunset) {
+      fill = '#ffffff';
+    } else {
       const glow = ctx.createLinearGradient(anchorX - zw / 2, 0, anchorX + zw / 2, 0);
       glow.addColorStop(0, '#ffe259');
       glow.addColorStop(0.5, '#ff7e5f');
       glow.addColorStop(1, grade.accent);
-      ctx.fillStyle = glow;
-    } else {
-      ctx.fillStyle = '#ffffff';
+      fill = glow;
     }
-    ctx.shadowColor = 'rgba(0,0,0,0.45)';
-    ctx.shadowBlur = px * 0.12;
-    ctx.shadowOffsetY = px * 0.03;
-    ctx.fillText(title, anchorX, ty);
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetY = 0;
+    drawOutlinedText(ctx, title, anchorX, ty, px, fill);
   }
 
   if (subtitle) {
@@ -313,15 +365,15 @@ function paintLettering(ctx, state, zone, w, h) {
     // stays readable over bright sand and sky.
     const px = fitLine(ctx, subtitle, 'Pacifico, cursive', Math.max(14, zh * 0.22), zw * 0.96);
     const sy = zy + zh * (title ? 0.74 : 0.5);
-    ctx.lineWidth = Math.max(2, px * 0.08);
-    ctx.strokeStyle = 'rgba(16,6,26,0.85)';
-    ctx.strokeText(subtitle, anchorX, sy);
-    ctx.fillStyle = grade.scriptInk;
-    ctx.shadowColor = 'rgba(0,0,0,0.5)';
-    ctx.shadowBlur = px * 0.25;
-    ctx.fillText(subtitle, anchorX, sy);
-    ctx.shadowBlur = 0;
+    drawOutlinedText(ctx, subtitle, anchorX, sy, px, grade.scriptInk);
   }
+}
+
+/** The star meter as text: filled stars for the rating, hollow ones up
+ * to five, so a 3-star cover reads ★★★☆☆. */
+function starMeter(stars) {
+  const filled = Math.max(0, Math.min(5, stars));
+  return '★'.repeat(filled) + '☆'.repeat(5 - filled);
 }
 
 /** A small badge pill and a star meter in the cover's top corners. */
@@ -350,7 +402,7 @@ function paintCorners(ctx, state, w, h) {
     ctx.fillStyle = '#ffd166';
     ctx.shadowColor = 'rgba(0,0,0,0.6)';
     ctx.shadowBlur = px * 0.2;
-    ctx.fillText('★'.repeat(state.stars) + '☆'.repeat(Math.max(0, 5 - state.stars)), w - pad, pad + bh / 2);
+    ctx.fillText(starMeter(state.stars), w - pad, pad + bh / 2);
     ctx.shadowBlur = 0;
   }
 }
@@ -366,15 +418,15 @@ function traceRoundRect(ctx, x, y, w, h, r) {
 }
 
 /**
- * Paints the whole cover for `state` onto `canvas` at the canvas's own
- * size. `images` is the library of loaded photos; a panel's `photo` is
- * its index. Returns the list of photo cell rects (pixels) for
- * hit-testing in the editor.
+ * Paints every layer of the cover — background, photo cells, washes,
+ * lettering, corners, vignette, grain — onto `ctx` at `w` by `h`.
+ * `images` is the library of loaded photos; a panel's `photo` is its
+ * index. Returns the list of photo cell rects (pixels) for hit-testing
+ * in the editor. This is the shared pipeline: paintCover calls it
+ * directly for ordinary grades, and onto an offscreen canvas first when
+ * a grade needs a whole-cover effect on top.
  */
-export function paintCover(canvas, state, images) {
-  const ctx = canvas.getContext('2d');
-  const w = canvas.width;
-  const h = canvas.height;
+function paintLayers(ctx, state, images, w, h) {
   const layout = COVER_LAYOUTS[state.layout] ?? COVER_LAYOUTS['hero-trio'];
   const grade = COLOR_GRADES[state.grade] ?? COLOR_GRADES.sunset;
   const gap = state.showFrames ? Math.max(2, Math.round(Math.min(w, h) * 0.008)) : 0;
@@ -466,12 +518,124 @@ export function paintCover(canvas, state, images) {
   }
   if (state.showGrain) {
     ctx.save();
-    ctx.globalAlpha = 0.07;
+    // The VHS grade gets heavier grain: tape noise is part of the look.
+    ctx.globalAlpha = grade.fx === 'vhs' ? 0.12 : 0.07;
     ctx.globalCompositeOperation = 'overlay';
     ctx.fillStyle = noisePattern(ctx);
     ctx.fillRect(0, 0, w, h);
     ctx.restore();
   }
+  return hitBoxes;
+}
+
+/** A copy of `source` tinted to one colour channel: drawing it with
+ * 'multiply' keeps that channel and dims the other two, so the copy
+ * reads as a red or cyan ghost of the original. */
+function tintCopy(source, color) {
+  const copy = document.createElement('canvas');
+  copy.width = source.width;
+  copy.height = source.height;
+  const t = copy.getContext('2d');
+  t.drawImage(source, 0, 0);
+  t.globalCompositeOperation = 'multiply';
+  t.fillStyle = color;
+  t.fillRect(0, 0, copy.width, copy.height);
+  return copy;
+}
+
+/** The VHS channel split: the finished cover drawn twice more, a couple
+ * of pixels apart, once red and once cyan, screened over the base image.
+ * The offset grows with the cover so the fringe stays visible at export
+ * sizes, and the ghosts are dimmed so the title stays readable. */
+function splitChannels(ctx, source, w, h) {
+  const shift = Math.max(2, Math.round(w * 0.002));
+  const red = tintCopy(source, '#ff2d55');
+  const cyan = tintCopy(source, '#00e5ff');
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  ctx.globalAlpha = 0.5;
+  ctx.drawImage(red, -shift, 0);
+  ctx.drawImage(cyan, shift, 0);
+  ctx.restore();
+}
+
+/** The VHS scanlines: a dark hairline every third row, over the whole
+ * cover. Thin enough to read as tape, not as a grid over the photos. */
+function paintScanlines(ctx, w, h) {
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.16)';
+  for (let y = 0; y < h; y += 3) ctx.fillRect(0, y, w, 1);
+  ctx.restore();
+}
+
+/** The VHS tracking wobble: a pale band, a dark band and a faint second
+ * pale band, placed at random heights each paint. On the live preview
+ * they drift from frame to frame like a tape losing sync; on an export
+ * they freeze wherever they landed for that one render. */
+function paintTrackingBands(ctx, w, h) {
+  // With reduced motion requested, the band sits still instead of
+  // jumping to a new height on every paint.
+  const still = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const bandY = still ? Math.floor(h * 0.3) : Math.floor(Math.random() * h);
+  const thin = Math.max(1, Math.round(h * 0.002));
+  const thick = Math.max(2, Math.round(h * 0.004));
+  ctx.save();
+  ctx.globalAlpha = 0.1;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, bandY, w, thick);
+  ctx.globalAlpha = 0.08;
+  ctx.fillRect(0, (bandY + Math.round(h * 0.35)) % h, w, thin);
+  ctx.globalAlpha = 0.14;
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, (bandY + Math.round(h * 0.62)) % h, w, thin + 1);
+  ctx.restore();
+}
+
+/** The camcorder readout VHS tapes used to burn into the frame: a fixed
+ * PLAY marker and timecode in a monospace face, dimmed so it reads as
+ * part of the tape rather than as a caption. The text is fixed, so an
+ * export is deterministic — the same cover always carries the same
+ * readout — and it sits top centre, clear of the badge and the stars. */
+function paintVhsOsd(ctx, w, h) {
+  const px = Math.max(12, Math.round(Math.min(w, h) * 0.018));
+  ctx.save();
+  ctx.font = `${px}px "Courier New", monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.shadowColor = 'rgba(0,0,0,0.6)';
+  ctx.shadowBlur = px * 0.2;
+  ctx.fillText('▶ PLAY  SP 0:00:00', w / 2, Math.round(h * 0.02));
+  ctx.restore();
+}
+
+/**
+ * Paints the whole cover for `state` onto `canvas` at the canvas's own
+ * size. For an ordinary grade the layers go straight onto the canvas;
+ * for a grade with a whole-cover effect (VHS) they are painted onto an
+ * offscreen canvas first, then the effect is composited on top, so the
+ * scanlines and channel split cover the lettering as well as the photos.
+ * Returns the list of photo cell rects (pixels) for hit-testing in the
+ * editor.
+ */
+export function paintCover(canvas, state, images) {
+  const w = canvas.width;
+  const h = canvas.height;
+  const grade = COLOR_GRADES[state.grade] ?? COLOR_GRADES.sunset;
+  if (grade.fx !== 'vhs') {
+    return paintLayers(canvas.getContext('2d'), state, images, w, h);
+  }
+  const off = document.createElement('canvas');
+  off.width = w;
+  off.height = h;
+  const hitBoxes = paintLayers(off.getContext('2d'), state, images, w, h);
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, w, h);
+  ctx.drawImage(off, 0, 0);
+  splitChannels(ctx, off, w, h);
+  paintScanlines(ctx, w, h);
+  paintTrackingBands(ctx, w, h);
+  paintVhsOsd(ctx, w, h);
   return hitBoxes;
 }
 

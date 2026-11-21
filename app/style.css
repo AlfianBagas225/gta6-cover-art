@@ -1,7 +1,13 @@
 /* Palm Sunset Cover Studio — dark editor chrome around a bright cover.
    Display fonts are vendored under ./fonts/ (SIL Open Font License).
-   The lettering polish lives in app/src/cover.js: a bigger title, an
-   outlined subtitle and a deeper scrim, so the cover still reads small. */
+   The control panel is grouped into numbered sections, each with a short
+   hint under its heading, so every control says what it does at a glance;
+   the grade grid holds six swatches now that VHS joined, and the layout
+   grid runs four across for the seventh layout. The lettering polish
+   lives in app/src/cover.js: a bigger title, an outlined subtitle and a
+   deeper scrim, so the cover still reads small. */
+
+/* ---- Tokens ---- */
 :root {
   --ink: #f3eef7;
   --ink-dim: #b9a8c6;
@@ -20,6 +26,7 @@
   --page-bg: #17101f;
 }
 
+/* ---- Vendored display fonts ---- */
 @font-face {
   font-family: Anton;
   src: url('./fonts/Anton-Regular.ttf') format('truetype');
@@ -36,9 +43,11 @@
   font-display: swap;
 }
 
+/* ---- Page base ---- */
 html, body { margin: 0; min-height: 100%; background: var(--page-bg); color: var(--ink); font: 15px/1.45 system-ui, sans-serif; }
 body { display: flex; flex-direction: column; }
 
+/* ---- Masthead ---- */
 .masthead {
   display: flex; align-items: center; justify-content: space-between; gap: 20px;
   padding: 14px 22px; background: linear-gradient(90deg, var(--sunset), var(--pink) 55%, var(--violet));
@@ -47,11 +56,35 @@ body { display: flex; flex-direction: column; }
 .masthead h1 { margin: 0; font-family: Anton, sans-serif; font-weight: 400; font-size: 30px; letter-spacing: 1px; text-shadow: 0 2px 0 rgba(0,0,0,.25); }
 .masthead p { margin: 2px 0 0; opacity: .95; font-size: 13.5px; }
 .masthead-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.masthead-actions button { background: rgba(0,0,0,.28); }
+.masthead-actions button:hover { background: rgba(0,0,0,.42); }
 
+/* ---- App layout ---- */
 .app { display: flex; gap: 22px; padding: 18px 22px 26px; flex: 1; align-items: flex-start; }
 .panel { width: 330px; flex-shrink: 0; display: flex; flex-direction: column; gap: 16px; }
-.panel section { background: var(--panel-bg); border: 1px solid var(--panel-line); border-radius: 12px; padding: 14px; }
-.panel h2 { margin: 0 0 10px; font-family: 'Bebas Neue', sans-serif; font-weight: 400; font-size: 21px; letter-spacing: 2px; color: var(--gold); }
+
+/* One control group: a card with a sunset edge on the left, a heading
+   with a rule under it, and a short hint line that says what the group
+   does before any control is touched. */
+.panel section {
+  background: var(--panel-bg); border: 1px solid var(--panel-line); border-left: 3px solid var(--sunset);
+  border-radius: 12px; padding: 14px;
+}
+.panel h2 {
+  margin: 0; font-family: 'Bebas Neue', sans-serif; font-weight: 400; font-size: 21px;
+  letter-spacing: 2px; color: var(--gold); padding-bottom: 6px;
+  border-bottom: 1px solid var(--panel-line);
+}
+.section-hint { margin: 8px 0 10px; color: var(--ink-dim); font-size: 12.5px; font-weight: 400; line-height: 1.5; }
+/* A subgroup inside a section — a small caps label over a cluster of
+   related controls, so a long section reads as two short ones. */
+.control-subgroup { margin-top: 12px; }
+.control-subgroup h3 {
+  margin: 0 0 8px; font-family: 'Bebas Neue', sans-serif; font-weight: 400;
+  font-size: 15px; letter-spacing: 2px; color: var(--teal); text-transform: uppercase;
+}
+
+/* ---- Fields ---- */
 .panel label { display: flex; flex-direction: column; gap: 5px; font-weight: 600; font-size: 13px; margin-bottom: 8px; }
 .panel label.toggle { flex-direction: row; align-items: center; gap: 8px; font-weight: 400; margin-bottom: 4px; }
 input[type=text], select {
@@ -59,15 +92,25 @@ input[type=text], select {
   background: var(--field-bg); color: var(--ink);
 }
 input[type=range] { width: 100%; accent-color: var(--sunset); }
+
+/* ---- Buttons ---- */
 button {
   font: inherit; font-weight: 700; padding: 9px 12px; border: 0; border-radius: 8px;
   background: var(--btn-bg); color: #fff; cursor: pointer;
 }
 button:hover { background: var(--btn-bg-hover); }
+button:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 2px solid var(--gold); outline-offset: 2px;
+}
 button.accent-btn { background: linear-gradient(90deg, var(--sunset), var(--pink)); flex: 1; }
 button.accent-btn:hover { filter: brightness(1.1); }
-.masthead-actions button { background: rgba(0,0,0,.28); }
-.masthead-actions button:hover { background: rgba(0,0,0,.42); }
+/* Randomize is the loudest button in the masthead: gold, so the eye
+   finds the one-click fresh cover first. */
+button.randomize-btn {
+  background: linear-gradient(90deg, var(--gold), var(--sunset)); color: #241533;
+}
+button.randomize-btn:hover { filter: brightness(1.08); background: linear-gradient(90deg, var(--gold), var(--sunset)); }
+
 .row { display: flex; gap: 8px; }
 .row > * { flex: 1; }
 .note { margin: 6px 0 0; color: var(--ink-dim); font-size: 12.5px; font-weight: 400; }
@@ -77,18 +120,21 @@ button.accent-btn:hover { filter: brightness(1.1); }
 .toggles label { margin-bottom: 4px; }
 #notice { min-height: 20px; margin: 8px 0 0; color: var(--teal); font-size: 13px; }
 
+/* ---- Photo strip ---- */
 .upload-box {
   display: block; padding: 12px; border: 2px dashed var(--field-line); border-radius: 8px;
   text-align: center; cursor: pointer; margin-bottom: 8px;
 }
 .upload-box input { display: none; }
-
 .strip { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .strip-item { padding: 0; border: 2px solid transparent; border-radius: 6px; overflow: hidden; background: none; width: 64px; height: 64px; }
 .strip-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .strip-item.selected { border-color: var(--gold); }
 
-.layout-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+/* ---- Layout picker ---- */
+/* Seven layouts, four across: the last row holds three, and the extra
+   breathing room keeps the mini-maps readable. */
+.layout-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .layout-grid button {
   display: flex; flex-direction: column; gap: 6px; align-items: center;
   padding: 8px 4px; font-size: 11.5px; font-weight: 600;
@@ -101,7 +147,9 @@ button.accent-btn:hover { filter: brightness(1.1); }
 .mini-map i { position: absolute; background: rgba(255,255,255,.75); box-shadow: inset 0 0 0 1px var(--pink); }
 .mini-map i.title-tile { background: var(--violet); }
 
-.grade-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+/* ---- Grade picker ---- */
+/* Six grades, six across — one swatch per mood, VHS last. */
+.grade-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
 .grade-grid button { height: 46px; padding: 0; position: relative; border: 2px solid transparent; }
 .grade-grid button span {
   position: absolute; inset: auto 0 0 0; font-size: 10.5px; font-weight: 700;
@@ -109,10 +157,12 @@ button.accent-btn:hover { filter: brightness(1.1); }
 }
 .grade-grid button.selected { border-color: var(--gold); }
 
+/* ---- Export sizes ---- */
 .size-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
 .size-option { flex-direction: row !important; align-items: center; gap: 8px; font-weight: 400; margin-bottom: 0 !important; }
 .size-option input { accent-color: var(--sunset); }
 
+/* ---- Live preview ---- */
 .preview { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 10px; position: sticky; top: 12px; }
 .preview canvas {
   max-width: 100%; max-height: calc(100vh - 150px); width: auto; height: auto;
@@ -121,9 +171,18 @@ button.accent-btn:hover { filter: brightness(1.1); }
 }
 .preview canvas:active { cursor: grabbing; }
 .preview .note { text-align: center; }
+.cover-summary { margin: 0; color: var(--ink-dim); font-size: 12.5px; text-align: center; }
+
+/* ---- Narrow screens: the panel stacks above the preview. ---- */
+@media (max-width: 900px) {
+  .app { flex-direction: column; }
+  .panel { width: 100%; }
+  .preview { position: static; width: 100%; }
+  .masthead { flex-wrap: wrap; }
+}
 
 /* Screenshot mode: the cover alone, edge to edge. */
-body.shot-mode .masthead, body.shot-mode .panel, body.shot-mode .preview .note { display: none; }
+body.shot-mode .masthead, body.shot-mode .panel, body.shot-mode .preview .note, body.shot-mode .cover-summary { display: none; }
 body.shot-mode .app { padding: 0; }
 body.shot-mode .preview { position: static; }
 body.shot-mode canvas { width: 100vw; height: 100vh; max-width: none; max-height: none; box-shadow: none; border-radius: 0; }

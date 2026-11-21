@@ -6,14 +6,19 @@
 // app in: it copies app/ and screenshots/ from beside this file into the
 // output directory and writes output/dossier.json, the summary the judge
 // reads, with the vendored make.fun library. The cover maker itself lives
-// in app/src/cover.js (six multi-panel compositions, five sunset and neon
-// colour grades, gradient poster lettering, grain and vignette) and
-// app/src/main.js (the editor: photos in, panels dragged and zoomed, PNG
+// in app/src/cover.js (seven multi-panel compositions — the newest is
+// Neon Grid, with the title slotted into the middle row — six colour
+// grades including a retro VHS treatment with scanlines, a channel split
+// and tracking bands, gradient poster lettering, grain and vignette) and
+// app/src/main.js (the editor: photos in, panels dragged and zoomed,
+// Shift-click to swap two panels, a Randomize button that shuffles the
+// layout, grade, title spot, title font and caption in one click, PNG
 // out in 1080 x 1080, 1080 x 1350 and 1920 x 1080). The four screenshots
 // in screenshots/ are the app's own drawings — a landscape exported cover
-// first, then the editor with a photo loaded, a portrait cover and a
-// square cover. The lettering is polished so the title and subtitle still
-// read at ~300 px wide (bigger title, outlined subtitle, deeper scrim).
+// first (the new Neon Grid in the VHS grade), then the editor with a
+// photo loaded, a portrait cover and a square cover. The lettering is
+// polished so the title and subtitle still read at ~300 px wide (bigger
+// title, outlined subtitle, deeper scrim).
 //
 // Serve it locally with `node serve.ts`, then open http://localhost:8080.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
