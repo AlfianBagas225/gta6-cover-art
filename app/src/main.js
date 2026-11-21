@@ -1,550 +1,452 @@
-// Palm Sunset Cover Studio — the editor.
-//
-// Wires the page together: photos in, layout and grade picked, caption
-// typed, panels dragged and zoomed on the live preview, PNG out in three
-// post sizes. The app opens with the two sample photos already loaded as
-// a finished cover, so the first export is one click away; a person's own
-// photos replace them from their machine and never leave it. A `?shot=`
-// query sets up a fixed scene for a screenshot instead (./shots.js).
-//
-// Two shortcuts live here as well. Randomize (the 🎲 button, or the R
-// key) shuffles the layout, the grade, the title spot, the title font
-// and the caption in one click, always landing on a combination unlike
-// the one on screen. Shift-clicking a second panel swaps its photo with
-// the selected panel's, so two shots can trade places without re-picking
-// either from the strip.
-import { COVER_LAYOUTS, COLOR_GRADES, EXPORT_PRESETS, freshState, paintCover, renderToCanvas, photoCells } from './cover.js';
-import { stageShot } from './shots.js';
+/**
+ * main.js — the studio's wiring: state, editor, and the live preview.
+ *
+ * The cover engine (cover.js) draws; this file owns everything around it:
+ * loading the sample photos, keeping the editor state, answering pointer,
+ * wheel and keyboard input, and turning the scene query string (?shot=…)
+ * into the four screenshot views. Nothing here fetches over the network:
+ * photos come from app/samples/ or the person's own file picker.
+ */
 
-const preview = document.getElementById('previewCanvas');
-const notice = document.getElementById('notice');
-const cover = freshState();
-const library = []; // { img, name } — the person's photo library, local only
-let activePanel = 0;
-let previewSize = EXPORT_PRESETS[0];
-let hitBoxes = [];
+import {
+  LAYOUTS,
+  GRADES,
+  TITLE_FILLS,
+  EXPORT_SIZES,
+  layoutById,
+  gradeById,
+  panelAtPoint,
+  drawCoverArt,
+  defaultPanelCrops,
+  defaultCoverState,
+  coverFileName,
+  exportCoverPng,
+} from "./cover.js";
+import { shotSceneFromUrl } from "./shots.js";
 
-/** Undo / redo over snapshots of the cover state. A snapshot is the
- * whole state as JSON, so undo restores the layout, grade, caption and
- * every panel at once. */
-const history = {
-  past: [],
-  future: [],
-  snapshot() {
-    return JSON.stringify(cover);
-  },
-  commit() {
-    this.past.push(this.snapshot());
-    if (this.past.length > 60) this.past.shift();
-    this.future.length = 0;
-  },
-  undo() {
-    if (!this.past.length) return false;
-    this.future.push(this.snapshot());
-    this.apply(this.past.pop());
-    return true;
-  },
-  redo() {
-    if (!this.future.length) return false;
-    this.past.push(this.snapshot());
-    this.apply(this.future.pop());
-    return true;
-  },
-  apply(json) {
-    Object.assign(cover, JSON.parse(json));
-    syncForm();
-    repaint();
-  },
-};
+/** The two sample photos the studio ships with, under app/samples/. */
+const SAMPLE_PHOTOS = ["samples/boulevard.jpg", "samples/pier.jpg"];
 
-function announce(msg) {
-  notice.textContent = msg;
+/** Small helper: one element by id, failing loudly when the markup moves. */
+function el(id) {
+  const node = document.getElementById(id);
+  if (!node) throw new Error(`main.js: #${id} is missing from index.html`);
+  return node;
 }
 
-/** Loads an image from a URL, resolving once it can be drawn. */
-export function loadImage(url) {
-  return new Promise((resolve, reject) => {
+/** Load one image, resolving with the element or null when it fails. */
+function loadImage(src) {
+  return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error(`could not load ${url}`));
-    img.src = url;
+    img.onerror = () => resolve(null);
+    img.src = src;
   });
 }
 
-/** One line under the preview naming the cover on screen — layout,
- * grade, title and export size — and the browser tab follows the
- * title, so a saved tab can be told apart from the next one. */
-function renderSummary() {
-  const layout = COVER_LAYOUTS[cover.layout]?.name ?? cover.layout;
-  const grade = COLOR_GRADES[cover.grade]?.name ?? cover.grade;
-  const title = (cover.title || '').trim() || 'Untitled';
-  document.getElementById('coverSummary').textContent = `${layout} · ${grade} grade · “${title}” · ${previewSize.name}`;
-  document.title = `${title} — Palm Sunset Cover Studio`;
+/** The studio's state: one object, mutated only through the helpers below. */
+const state = defaultCoverState();
+
+/** Loaded photos, in the same order as state.panels' photo indexes. */
+let photos = [];
+
+/** The preview canvas and its 2d context. */
+const canvas = el("coverCanvas");
+const preview = canvas.getContext("2d");
+
+/** A drag in progress: which panel, where it started, and its crop then. */
+let drag = null;
+
+/** Read the cover size for the current state. */
+function currentSize() {
+  return EXPORT_SIZES[state.size] ?? EXPORT_SIZES.portrait;
 }
 
-function repaint() {
-  preview.width = previewSize.w;
-  preview.height = previewSize.h;
-  hitBoxes = paintCover(preview, cover, library.map((p) => p.img));
-  // A cover screenshot shows the exported art alone — no editor chrome on it.
-  if (!document.body.classList.contains('shot-mode')) markActivePanel();
-  renderStrip();
-  renderSummary();
+/** Redraw the preview and refresh every readout that mirrors the state. */
+function render() {
+  const info = drawCoverArt(canvas, state, photos);
+  drawSelectionOutline(info);
+  syncEditorReadouts(info);
+  return info;
 }
 
-/** Outlines the active panel on the preview so it can be found at a glance. */
-function markActivePanel() {
-  const box = hitBoxes[activePanel];
-  if (!box) return;
-  const ctx = preview.getContext('2d');
-  const s = Math.min(preview.width, preview.height);
-  ctx.save();
-  ctx.strokeStyle = '#ffd166';
-  ctx.lineWidth = Math.max(3, s * 0.006);
-  ctx.setLineDash([Math.round(s * 0.02), Math.round(s * 0.012)]);
-  ctx.strokeRect(box.left, box.top, box.width, box.height);
-  ctx.restore();
-}
-
-/** One thumbnail button for the photo strip: the photo itself, a gold
- * ring when it is the one in the selected panel, and a click that puts
- * it there as one undoable step. */
-function stripButton(entry, i) {
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.className = 'strip-item' + (cover.panels[activePanel]?.photo === i ? ' selected' : '');
-  b.title = `Put ${entry.name} in the selected panel`;
-  const thumb = document.createElement('img');
-  thumb.src = entry.img.src;
-  thumb.alt = entry.name;
-  b.append(thumb);
-  b.addEventListener('click', () => {
-    history.commit();
-    cover.panels[activePanel] = { ...cover.panels[activePanel], photo: i };
-    repaint();
-    announce(`${entry.name} is now in panel ${activePanel + 1}.`);
+/** Dashed outline around the selected panel, drawn over the finished art. */
+function drawSelectionOutline(info) {
+  const layout = layoutById(state.layout);
+  const panel = layout.panels[state.selected];
+  if (!panel || document.body.classList.contains("shot-cover")) return;
+  const { width, height } = info;
+  preview.save();
+  preview.setLineDash([10, 8]);
+  preview.lineWidth = Math.max(2, width * 0.003);
+  preview.strokeStyle = "#22e6ff";
+  preview.shadowColor = "#22e6ff";
+  preview.shadowBlur = Math.max(6, width * 0.006);
+  preview.beginPath();
+  panel.points.forEach(([nx, ny], i) => {
+    const px = nx * width;
+    const py = ny * height;
+    if (i === 0) preview.moveTo(px, py);
+    else preview.lineTo(px, py);
   });
-  return b;
+  preview.closePath();
+  preview.stroke();
+  preview.restore();
 }
 
-function renderStrip() {
-  const strip = document.getElementById('photoStrip');
-  strip.replaceChildren();
-  library.forEach((entry, i) => strip.append(stripButton(entry, i)));
-  document.getElementById('panelInfo').textContent = `Panel ${activePanel + 1} of ${photoCells(cover.layout).length}`;
-  const panel = cover.panels[activePanel];
-  if (panel) {
-    document.getElementById('zoomSlider').value = panel.zoom;
-    document.getElementById('panXSlider').value = panel.panX;
-    document.getElementById('panYSlider').value = panel.panY;
-  }
-}
-
-function syncForm() {
-  const set = (id, value) => { document.getElementById(id).value = value; };
-  const check = (id, value) => { document.getElementById(id).checked = value; };
-  set('titleInput', cover.title);
-  set('subtitleInput', cover.subtitle);
-  set('titleFace', cover.titleFace);
-  set('titleStyle', cover.titleStyle);
-  set('titleSpot', cover.titleSpot);
-  check('titleSunset', cover.titleSunset);
-  check('showFrames', cover.showFrames);
-  check('showGrain', cover.showGrain);
-  check('showVignette', cover.showVignette);
-  check('showBadge', cover.showBadge);
-  set('starCount', String(cover.stars));
-  document.querySelectorAll('#layoutPicker button').forEach((b) => b.classList.toggle('selected', b.dataset.layout === cover.layout));
-  document.querySelectorAll('#gradePicker button').forEach((b) => b.classList.toggle('selected', b.dataset.grade === cover.grade));
-  document.querySelectorAll('input[name=size]').forEach((r) => { r.checked = r.value === previewSize.key; });
-}
-
-/** One picker button: a button with a title tooltip and a name label,
- * wired so picking runs `onPick` and, when it reports a change, syncs
- * the form and repaints. The layout and grade pickers share it; each
- * adds its own visual (a mini-map or a swatch) after the button is
- * built. `onPick` returns true when it changed the cover, so picking
- * the value already on screen is a no-op instead of an undo step. */
-function pickerButton(wrap, name, title, onPick) {
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.title = title;
-  const label = document.createElement('span');
-  label.textContent = name;
-  b.append(label);
-  b.addEventListener('click', () => {
-    if (onPick()) {
-      syncForm();
-      repaint();
-    }
+/** Mirror the state into the editor panel: names, blurbs, dots, readouts. */
+function syncEditorReadouts(info) {
+  const layout = layoutById(state.layout);
+  const grade = gradeById(state.grade);
+  el("layoutName").textContent = layout.name;
+  el("layoutBlurb").textContent = layout.blurb;
+  el("gradeName").textContent = grade.name;
+  el("gradeBlurb").textContent = grade.blurb;
+  el("fileNamePreview").textContent = coverFileName(state);
+  const crop = state.panels[state.selected] ?? { photo: 0, scale: 1 };
+  const photoName = photos[crop.photo] ? photoNameOf(crop.photo) : "no photo";
+  el("photoLabel").textContent = `Panel ${state.selected + 1} · ${photoName}`;
+  el("zoomLabel").textContent = `${Math.round(crop.scale * 100)}% zoom`;
+  document.querySelectorAll("#layoutDots button").forEach((b, i) => {
+    b.classList.toggle("active", LAYOUTS[i].id === state.layout);
+    b.setAttribute("aria-pressed", String(LAYOUTS[i].id === state.layout));
   });
-  wrap.append(b);
-  return b;
+  document.querySelectorAll("#gradeSwatches button").forEach((b, i) => {
+    b.classList.toggle("active", GRADES[i].id === state.grade);
+    b.setAttribute("aria-pressed", String(GRADES[i].id === state.grade));
+  });
+  document.querySelectorAll("[data-fill]").forEach((b) => {
+    b.classList.toggle("active", b.dataset.fill === state.titleFill);
+  });
+  document.querySelectorAll("[data-size]").forEach((b) => {
+    b.classList.toggle("active", b.dataset.size === state.size);
+  });
+  document.querySelectorAll("#panelStrip button").forEach((b, i) => {
+    b.classList.toggle("active", i === state.selected);
+  });
 }
 
-/** Builds the layout picker: one button per layout, with a mini diagram.
- * A title cell in the diagram uses the layout's lettering zone for its
- * geometry, so the mosaic's centre block shows up purple. */
-function buildLayoutGrid() {
-  const wrap = document.getElementById('layoutPicker');
-  for (const [key, layout] of Object.entries(COVER_LAYOUTS)) {
-    const b = pickerButton(wrap, layout.name, layout.blurb, () => {
-      if (cover.layout === key) return false;
-      history.commit();
-      cover.layout = key;
-      activePanel = 0;
-      announce(`${layout.name} — ${photoCells(key).length} photo panels. Click a panel to fill it.`);
-      return true;
+/** A short display name for a loaded photo, from its source path. */
+function photoNameOf(index) {
+  const img = photos[index];
+  if (!img) return "empty";
+  const src = img.currentSrc || img.src || "";
+  const base = src.split("/").pop() || "upload";
+  return base.replace(/\.[a-z0-9]+$/i, "");
+}
+
+/** Rebuild the panel strip buttons for the current layout's panel count. */
+function rebuildPanelStrip() {
+  const strip = el("panelStrip");
+  strip.innerHTML = "";
+  const layout = layoutById(state.layout);
+  layout.panels.forEach((_, i) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = `P${i + 1}`;
+    button.title = `Select panel ${i + 1} (Shift-click another panel to swap photos)`;
+    button.addEventListener("click", () => {
+      state.selected = i;
+      render();
     });
-    b.dataset.layout = key;
-    const map = document.createElement('span');
-    map.className = 'mini-map';
-    for (const cell of layout.cells) {
-      const tile = document.createElement('i');
-      const geo = cell.isTitle ? layout.zone : cell;
-      tile.style.left = `${geo.left * 100}%`;
-      tile.style.top = `${geo.top * 100}%`;
-      tile.style.width = `${geo.width * 100}%`;
-      tile.style.height = `${geo.height * 100}%`;
-      if (cell.isTitle) tile.classList.add('title-tile');
-      map.append(tile);
-    }
-    b.prepend(map);
-  }
+    strip.appendChild(button);
+  });
 }
 
-/** Builds the grade picker: one swatch button per colour grade. */
-const GRADE_SWATCHES = {
-  sunset: 'linear-gradient(135deg,#ffd166,#ff5e7a,#c026d3)',
-  neon: 'linear-gradient(135deg,#ff3db8,#5ff2ff)',
-  'vice-gold': 'linear-gradient(135deg,#ffe259,#ffa751)',
-  'teal-night': 'linear-gradient(135deg,#0f766e,#1e3a8a)',
-  'mono-noir': 'linear-gradient(135deg,#f2f2f2,#111111)',
-  vhs: 'linear-gradient(135deg,#111111 0%,#111111 30%,#ff2d55 50%,#00e5ff 70%,#111111 100%)',
-};
-
-function buildGradeGrid() {
-  const wrap = document.getElementById('gradePicker');
-  for (const [key, grade] of Object.entries(COLOR_GRADES)) {
-    const b = pickerButton(wrap, grade.name, `${grade.name} grade`, () => {
-      if (cover.grade === key) return false;
-      history.commit();
-      cover.grade = key;
-      announce(`${grade.name} grade applied.`);
-      return true;
-    });
-    b.dataset.grade = key;
-    b.style.background = GRADE_SWATCHES[key];
-  }
+/** Switch layout, keeping crops sane for the new panel count. */
+function setLayout(id) {
+  const layout = layoutById(id);
+  state.layout = layout.id;
+  state.panels = defaultPanelCrops(layout.id, Math.max(1, photos.length));
+  state.selected = 0;
+  rebuildPanelStrip();
+  render();
 }
 
-/** Builds the export-size radios. */
-function buildSizeList() {
-  const wrap = document.getElementById('sizePicker');
-  for (const preset of EXPORT_PRESETS) {
-    const label = document.createElement('label');
-    label.className = 'size-option';
-    const radio = document.createElement('input');
-    radio.type = 'radio';
-    radio.name = 'size';
-    radio.value = preset.key;
-    radio.checked = preset.key === previewSize.key;
-    radio.addEventListener('change', () => {
-      previewSize = preset;
-      repaint();
-      announce(`Previewing ${preset.name}.`);
-    });
-    label.append(radio, document.createTextNode(preset.name));
-    wrap.append(label);
-  }
+/** Step the layout forward or back, wrapping around the seven. */
+function stepLayout(direction) {
+  const index = LAYOUTS.findIndex((l) => l.id === state.layout);
+  const next = (index + direction + LAYOUTS.length) % LAYOUTS.length;
+  setLayout(LAYOUTS[next].id);
 }
 
-function downloadPNG(preset) {
-  const out = renderToCanvas(cover, library.map((p) => p.img), preset.w, preset.h);
-  out.toBlob((blob) => {
-    if (!blob) return;
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    // The file name carries the layout and grade, so a downloaded cover
-    // can be told apart from the next export without opening it.
-    a.download = `palm-sunset-cover-${cover.layout}-${cover.grade}-${preset.key}.png`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-    announce(`Saved palm-sunset-cover-${cover.layout}-${cover.grade}-${preset.key}.png — share it anywhere.`);
-  }, 'image/png');
+/** Step the grade forward or back, wrapping around the six. */
+function stepGrade(direction) {
+  const index = GRADES.findIndex((g) => g.id === state.grade);
+  const next = (index + direction + GRADES.length) % GRADES.length;
+  state.grade = GRADES[next].id;
+  render();
 }
 
-async function addFiles(files) {
-  let added = 0;
-  for (const file of files) {
-    if (!file.type.startsWith('image/')) continue;
-    const img = await loadImage(URL.createObjectURL(file));
-    library.push({ img, name: file.name });
-    added += 1;
-  }
-  if (added) {
-    activePanel = 0;
-    repaint();
-    announce(`${added} photo${added > 1 ? 's' : ''} loaded — click a thumbnail to place one.`);
-  }
+/** Cycle the selected panel's photo through every loaded photo. */
+function nextPhoto() {
+  if (photos.length === 0) return;
+  const crop = state.panels[state.selected];
+  if (!crop) return;
+  crop.photo = (crop.photo + 1) % photos.length;
+  render();
 }
 
-/** Loads the two bundled sample photos so the app opens as a finished cover.
- * Returns how many loaded, so the button can say so instead of guessing. */
-async function loadSamples() {
-  let loaded = 0;
-  for (const name of ['boulevard.jpg', 'pier.jpg']) {
-    try {
-      const img = await loadImage(`samples/${name}`);
-      library.push({ img, name });
-      loaded += 1;
-    } catch { /* a missing sample just leaves the library smaller */ }
-  }
-  return loaded;
+/** Swap the photos of two panels (the Shift-click gesture). */
+function swapPanelPhotos(a, b) {
+  const cropA = state.panels[a];
+  const cropB = state.panels[b];
+  if (!cropA || !cropB || a === b) return;
+  const photo = cropA.photo;
+  cropA.photo = cropB.photo;
+  cropB.photo = photo;
+  render();
 }
 
-/** Picks a fresh combination for the cover in one click: a new layout, a
- * new grade, a new title spot and title font, and a new caption pair.
- * Every roll avoids the value on screen, so the result always looks
- * different — a layout or grade that matches the current one is rolled
- * again instead of landing as a no-op shuffle. */
-function randomizeCover() {
-  const captions = [
-    ['NEON SHORE', 'a vice coast story'],
-    ['PIER PRESSURE', 'golden hour, no mercy'],
-    ['BOULEVARD QUEEN', 'crown optional'],
-    ['NIGHT SHIFT', 'the city never sleeps'],
-    ['SUNSET HEIST', 'one last job'],
-    ['PALM & CHROME', 'summer in the city'],
-  ];
-  // A fresh pick from `choices` that is not `current`; with only one
-  // choice there is nothing to avoid, so it comes back as-is.
-  const freshPick = (choices, current) => {
-    if (choices.length < 2) return choices[0];
-    let pick = choices[Math.floor(Math.random() * choices.length)];
-    while (pick === current) pick = choices[Math.floor(Math.random() * choices.length)];
-    return pick;
-  };
-  history.commit();
-  cover.layout = freshPick(Object.keys(COVER_LAYOUTS), cover.layout);
-  cover.grade = freshPick(Object.keys(COLOR_GRADES), cover.grade);
-  cover.titleSpot = freshPick(['bottom', 'top', 'center'], cover.titleSpot);
-  cover.titleFace = freshPick(['anton', 'bebas'], cover.titleFace);
-  cover.titleStyle = freshPick(['gradient', 'solid', 'outline'], cover.titleStyle);
-  const [title, subtitle] = captions[Math.floor(Math.random() * captions.length)];
-  cover.title = title;
-  cover.subtitle = subtitle;
-  activePanel = 0;
-  syncForm();
-  repaint();
-  announce(`Randomized: ${COVER_LAYOUTS[cover.layout].name} layout, ${COLOR_GRADES[cover.grade].name} grade, title ${cover.titleSpot}, ${cover.titleStyle} fill.`);
+/** Randomise layout, grade, title fill, photos and seed — the R key. */
+function randomiseCover() {
+  const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+  state.layout = pick(LAYOUTS).id;
+  state.grade = pick(GRADES).id;
+  state.titleFill = pick(TITLE_FILLS).id;
+  state.seed = Math.floor(Math.random() * 100000);
+  state.panels = defaultPanelCrops(state.layout, Math.max(1, photos.length));
+  state.panels.forEach((crop) => {
+    crop.photo = Math.floor(Math.random() * Math.max(1, photos.length));
+    crop.scale = 1 + Math.random() * 0.35;
+  });
+  state.selected = 0;
+  rebuildPanelStrip();
+  render();
 }
 
-/** Steps to the next grade in the picker order, wrapping round, as one
- * undoable step. G is the keyboard way to browse the looks without
- * reaching for the mouse. */
-function cycleGrade() {
-  const keys = Object.keys(COLOR_GRADES);
-  history.commit();
-  cover.grade = keys[(keys.indexOf(cover.grade) + 1) % keys.length];
-  syncForm();
-  repaint();
-  announce(`${COLOR_GRADES[cover.grade].name} grade applied.`);
-}
-
-/** Steps to the next layout in the picker order, wrapping round, as one
- * undoable step. L is the keyboard way to browse the compositions. */
-function cycleLayout() {
-  const keys = Object.keys(COVER_LAYOUTS);
-  history.commit();
-  cover.layout = keys[(keys.indexOf(cover.layout) + 1) % keys.length];
-  activePanel = 0;
-  syncForm();
-  repaint();
-  announce(`${COVER_LAYOUTS[cover.layout].name} — ${photoCells(cover.layout).length} photo panels.`);
-}
+/** Back to the studio's opening state, photos included. */
 function resetCover() {
-  history.commit();
-  Object.assign(cover, freshState());
-  activePanel = 0;
-  syncForm();
-  repaint();
-  announce('Back to the opening cover.');
+  const fresh = defaultCoverState();
+  Object.assign(state, fresh, { panels: defaultPanelCrops(fresh.layout, Math.max(1, photos.length)) });
+  el("titleInput").value = state.title;
+  el("subtitleInput").value = state.subtitle;
+  rebuildPanelStrip();
+  render();
 }
 
-function wireControls() {
-  document.getElementById('photoInput').addEventListener('change', (e) => addFiles(e.target.files));
-  document.getElementById('loadSamplesBtn').addEventListener('click', async () => {
-    if (library.length >= 2) { announce('The sample photos are already loaded.'); return; }
-    const loaded = await loadSamples();
-    repaint();
-    announce(loaded ? `${loaded} sample photo${loaded > 1 ? 's' : ''} loaded.` : 'The sample photos could not be loaded.');
-  });
-  document.getElementById('fillAllBtn').addEventListener('click', () => {
-    if (!library.length) return;
-    history.commit();
-    const pick = cover.panels[activePanel]?.photo ?? 0;
-    cover.panels = cover.panels.map((p) => ({ ...p, photo: pick }));
-    repaint();
-    announce('Every panel now uses the selected photo.');
-  });
-  document.getElementById('titleInput').addEventListener('input', (e) => { cover.title = e.target.value; repaint(); });
-  document.getElementById('subtitleInput').addEventListener('input', (e) => { cover.subtitle = e.target.value; repaint(); });
-  document.getElementById('titleFace').addEventListener('change', (e) => { history.commit(); cover.titleFace = e.target.value; repaint(); });
-  document.getElementById('titleStyle').addEventListener('change', (e) => { history.commit(); cover.titleStyle = e.target.value; repaint(); });
-  document.getElementById('titleSpot').addEventListener('change', (e) => { history.commit(); cover.titleSpot = e.target.value; repaint(); });
-  document.getElementById('titleSunset').addEventListener('change', (e) => { history.commit(); cover.titleSunset = e.target.checked; repaint(); });
-  for (const id of ['showFrames', 'showGrain', 'showVignette', 'showBadge']) {
-    document.getElementById(id).addEventListener('change', (e) => {
-      history.commit();
-      cover[id] = e.target.checked;
-      repaint();
-    });
+/** Export the current cover as a PNG named after its layout and grade. */
+async function exportCurrentCover() {
+  const button = el("exportBtn");
+  button.disabled = true;
+  button.textContent = "Rendering…";
+  try {
+    const { blob } = await exportCoverPng(state, photos);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = coverFileName(state);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } catch (err) {
+    console.error("export failed", err);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Export PNG";
   }
-  document.getElementById('starCount').addEventListener('change', (e) => { history.commit(); cover.stars = Number(e.target.value); repaint(); });
-  // One binding for the three framing sliders: each one writes its value
-  // onto the selected panel and repaints live, and the zoom slider
-  // commits to history when the drag ends.
-  const bindSlider = (id, apply) => {
-    document.getElementById(id).addEventListener('input', (e) => {
-      const panel = cover.panels[activePanel];
-      if (panel) {
-        apply(panel, Number(e.target.value));
-        repaint();
-      }
-    });
-  };
-  bindSlider('zoomSlider', (panel, value) => { panel.zoom = value; });
-  bindSlider('panXSlider', (panel, value) => { panel.panX = value; });
-  bindSlider('panYSlider', (panel, value) => { panel.panY = value; });
-  document.getElementById('zoomSlider').addEventListener('change', () => history.commit());
-  document.getElementById('exportBtn').addEventListener('click', () => downloadPNG(previewSize));
-  document.getElementById('exportAllBtn').addEventListener('click', () => {
-    EXPORT_PRESETS.forEach((preset, i) => setTimeout(() => downloadPNG(preset), i * 350));
-  });
-  document.getElementById('cyclePhotoBtn').addEventListener('click', () => {
-    if (!library.length) return;
-    history.commit();
-    const panel = cover.panels[activePanel];
-    panel.photo = ((panel.photo ?? 0) + 1) % library.length;
-    repaint();
-    announce(`Panel ${activePanel + 1} now shows ${library[panel.photo].name}.`);
-  });
-  document.getElementById('resetBtn').addEventListener('click', resetCover);
-  document.getElementById('randomizeBtn').addEventListener('click', randomizeCover);
-  document.addEventListener('keydown', (e) => {
-    // Single-letter shortcuts — except while typing in a field, where
-    // the letters belong to the text. R randomizes, G steps the grade,
-    // L steps the layout.
-    const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName ?? '');
-    if (typing || e.ctrlKey || e.metaKey) return;
-    if (e.key === 'r' || e.key === 'R') randomizeCover();
-    if (e.key === 'g' || e.key === 'G') cycleGrade();
-    if (e.key === 'l' || e.key === 'L') cycleLayout();
-  });
-  document.getElementById('undoBtn').addEventListener('click', () => {
-    if (history.undo()) announce('Undid the last change.');
-  });
-  document.getElementById('redoBtn').addEventListener('click', () => {
-    if (history.redo()) announce('Redid the change.');
-  });
-  document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); if (history.undo()) announce('Undid the last change.'); }
-    if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); if (history.redo()) announce('Redid the change.'); }
-  });
 }
 
-/** Pointer position on the canvas, in canvas pixels. */
-function pointerToCanvas(e) {
-  const rect = preview.getBoundingClientRect();
-  return {
-    x: ((e.clientX - rect.left) / rect.width) * preview.width,
-    y: ((e.clientY - rect.top) / rect.height) * preview.height,
-  };
+/** Map a pointer event to cover pixels, whatever the canvas display size. */
+function eventToCoverPixels(event) {
+  const rect = canvas.getBoundingClientRect();
+  const x = ((event.clientX - rect.left) / rect.width) * canvas.width;
+  const y = ((event.clientY - rect.top) / rect.height) * canvas.height;
+  return { x, y };
 }
 
-/** The index of the photo cell under point `p`, or -1 when the point
- * falls on a gap, a frame or the title block instead of a photo. */
-function hitTest(p) {
-  return hitBoxes.findIndex((r) => p.x >= r.left && p.x <= r.left + r.width && p.y >= r.top && p.y <= r.top + r.height);
+/** Pointer down: select a panel, or Shift-click to swap two panels' photos. */
+function onPointerDown(event) {
+  const { x, y } = eventToCoverPixels(event);
+  const layout = layoutById(state.layout);
+  const hit = panelAtPoint(x, y, layout, canvas.width, canvas.height);
+  if (hit < 0) return;
+  if (event.shiftKey && hit !== state.selected) {
+    swapPanelPhotos(state.selected, hit);
+    state.selected = hit;
+    render();
+    return;
+  }
+  state.selected = hit;
+  const crop = state.panels[hit];
+  drag = { panel: hit, startX: x, startY: y, ox: crop?.ox ?? 0, oy: crop?.oy ?? 0 };
+  canvas.setPointerCapture(event.pointerId);
+  render();
 }
 
-function wireCanvas() {
-  let dragging = false;
-  let last = null;
-  preview.addEventListener('pointerdown', (e) => {
-    const p = pointerToCanvas(e);
-    const hit = hitTest(p);
-    if (hit === -1) return;
-    if (e.shiftKey && hit !== activePanel) {
-      // Shift-click a second panel: trade its photo with the selected
-      // panel's, so two shots can swap places without re-picking either.
-      const first = cover.panels[activePanel];
-      const second = cover.panels[hit];
-      if (!first || !second) return;
-      history.commit();
-      const held = first.photo;
-      first.photo = second.photo;
-      second.photo = held;
-      const from = activePanel;
-      activePanel = hit;
-      repaint();
-      announce(`Swapped the photos in panels ${from + 1} and ${hit + 1}.`);
-      return;
+/** Pointer drag: pan the selected panel's photo inside its frame. */
+function onPointerMove(event) {
+  if (!drag) return;
+  const { x, y } = eventToCoverPixels(event);
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const crop = state.panels[drag.panel];
+  if (!crop) return;
+  crop.ox = drag.ox + (x - drag.startX);
+  crop.oy = drag.oy + (y - drag.startY);
+  void scaleX;
+  render();
+}
+
+/** Pointer up ends the drag. */
+function onPointerUp() {
+  drag = null;
+}
+
+/** Wheel over the canvas zooms the selected panel's photo. */
+function onWheel(event) {
+  event.preventDefault();
+  const crop = state.panels[state.selected];
+  if (!crop) return;
+  const factor = Math.exp(-event.deltaY * 0.0012);
+  crop.scale = Math.min(3, Math.max(0.8, crop.scale * factor));
+  render();
+}
+
+/** Keyboard shortcuts: R randomise, G grade, L layout, arrows nudge, 1-7 layout. */
+function onKeyDown(event) {
+  if (event.target && (event.target.tagName === "INPUT" || event.target.tagName === "TEXTAREA")) return;
+  const key = event.key.toLowerCase();
+  if (key === "r") {
+    randomiseCover();
+  } else if (key === "g") {
+    stepGrade(1);
+  } else if (key === "l") {
+    stepLayout(1);
+  } else if (key >= "1" && key <= "7") {
+    setLayout(LAYOUTS[Number(key) - 1].id);
+  } else if (key === "arrowleft" || key === "arrowright" || key === "arrowup" || key === "arrowdown") {
+    const crop = state.panels[state.selected];
+    if (!crop) return;
+    event.preventDefault();
+    const step = event.shiftKey ? 24 : 8;
+    if (key === "arrowleft") crop.ox -= step;
+    if (key === "arrowright") crop.ox += step;
+    if (key === "arrowup") crop.oy -= step;
+    if (key === "arrowdown") crop.oy += step;
+    render();
+  } else if (key === "+" || key === "=") {
+    const crop = state.panels[state.selected];
+    if (crop) {
+      crop.scale = Math.min(3, crop.scale * 1.1);
+      render();
     }
-    activePanel = hit;
-    dragging = true;
-    last = p;
-    preview.setPointerCapture(e.pointerId);
-    renderStrip();
-  });
-  preview.addEventListener('pointermove', (e) => {
-    if (!dragging || !last) return;
-    const p = pointerToCanvas(e);
-    const panel = cover.panels[activePanel];
-    const box = hitBoxes[activePanel];
-    if (!panel || !box) return;
-    panel.panX = Math.max(-0.5, Math.min(0.5, panel.panX + (p.x - last.x) / box.width));
-    panel.panY = Math.max(-0.5, Math.min(0.5, panel.panY + (p.y - last.y) / box.height));
-    last = p;
-    repaint();
-  });
-  preview.addEventListener('pointerup', () => {
-    if (dragging) history.commit();
-    dragging = false;
-    last = null;
-  });
-  preview.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    const panel = cover.panels[activePanel];
-    if (!panel) return;
-    panel.zoom = Math.max(1, Math.min(4, panel.zoom * Math.exp(-e.deltaY * 0.0012)));
-    repaint();
-  }, { passive: false });
+  } else if (key === "-") {
+    const crop = state.panels[state.selected];
+    if (crop) {
+      crop.scale = Math.max(0.8, crop.scale / 1.1);
+      render();
+    }
+  }
 }
 
-buildLayoutGrid();
-buildGradeGrid();
-buildSizeList();
-wireControls();
-wireCanvas();
-syncForm();
-
-const shotName = new URLSearchParams(location.search).get('shot');
-if (shotName) {
-  // A screenshot scene: the shot module sets the state up, loads the sample
-  // photos and paints, then raises window.__shotReady for the capture.
-  stageShot(shotName, new URLSearchParams(location.search), {
-    state: cover,
-    library,
-    loadImage,
-    loadSamples,
-    setPreviewSize(size) { previewSize = size; },
-    repaint,
-    announce,
-  });
-} else {
-  await loadSamples();
-  repaint();
-  announce('Sample cover loaded — add your own photos, or export this one now.');
+/** A photo picked from the person's machine joins the studio's photos. */
+async function onUploadPicked(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  const img = await loadImage(url);
+  if (img) {
+    photos.push(img);
+    const crop = state.panels[state.selected];
+    if (crop) crop.photo = photos.length - 1;
+    render();
+  }
+  event.target.value = "";
 }
+
+/** Wire every control in the editor panel to the state it drives. */
+function wireEditorControls() {
+  el("layoutPrev").addEventListener("click", () => stepLayout(-1));
+  el("layoutNext").addEventListener("click", () => stepLayout(1));
+  el("gradePrev").addEventListener("click", () => stepGrade(-1));
+  el("gradeNext").addEventListener("click", () => stepGrade(1));
+  el("randomizeBtn").addEventListener("click", randomiseCover);
+  el("resetBtn").addEventListener("click", resetCover);
+  el("exportBtn").addEventListener("click", exportCurrentCover);
+  el("nextPhotoBtn").addEventListener("click", nextPhoto);
+  el("uploadBtn").addEventListener("click", () => el("uploadInput").click());
+  el("uploadInput").addEventListener("change", onUploadPicked);
+  el("titleInput").addEventListener("input", (e) => {
+    state.title = e.target.value;
+    render();
+  });
+  el("subtitleInput").addEventListener("input", (e) => {
+    state.subtitle = e.target.value;
+    render();
+  });
+  document.querySelectorAll("#layoutDots button").forEach((b, i) => {
+    b.addEventListener("click", () => setLayout(LAYOUTS[i].id));
+  });
+  document.querySelectorAll("#gradeSwatches button").forEach((b, i) => {
+    b.addEventListener("click", () => {
+      state.grade = GRADES[i].id;
+      render();
+    });
+  });
+  document.querySelectorAll("[data-fill]").forEach((b) => {
+    b.addEventListener("click", () => {
+      state.titleFill = b.dataset.fill;
+      render();
+    });
+  });
+  document.querySelectorAll("[data-size]").forEach((b) => {
+    b.addEventListener("click", () => {
+      state.size = b.dataset.size;
+      render();
+    });
+  });
+  canvas.addEventListener("pointerdown", onPointerDown);
+  canvas.addEventListener("pointermove", onPointerMove);
+  canvas.addEventListener("pointerup", onPointerUp);
+  canvas.addEventListener("pointercancel", onPointerUp);
+  canvas.addEventListener("wheel", onWheel, { passive: false });
+  window.addEventListener("keydown", onKeyDown);
+}
+
+/** Apply a ?shot= scene: layout, grade, size, caption, cover-only chrome. */
+function applyShotScene() {
+  const scene = shotSceneFromUrl(window.location.search);
+  if (!scene) return;
+  state.layout = scene.layout;
+  state.grade = scene.grade;
+  state.size = scene.size;
+  state.title = scene.title;
+  state.subtitle = scene.subtitle;
+  state.titleFill = scene.titleFill;
+  state.panels = defaultPanelCrops(scene.layout, Math.max(1, photos.length));
+  el("titleInput").value = state.title;
+  el("subtitleInput").value = state.subtitle;
+  if (scene.coverOnly) document.body.classList.add("shot-cover");
+  document.title = `Palm Sunset — ${scene.id}`;
+}
+
+/** Boot: fonts, photos, controls, scene, first paint. */
+async function bootStudio() {
+  wireEditorControls();
+  rebuildPanelStrip();
+  el("titleInput").value = state.title;
+  el("subtitleInput").value = state.subtitle;
+  const loaded = await Promise.all(SAMPLE_PHOTOS.map((src) => loadImage(src)));
+  photos = loaded.filter(Boolean);
+  if (photos.length === 0) {
+    const placeholder = new Image();
+    photos = [placeholder];
+  }
+  applyShotScene();
+  rebuildPanelStrip();
+  try {
+    await Promise.all([
+      document.fonts.load("900 100px Anton"),
+      document.fonts.load("400 60px Pacifico"),
+      document.fonts.load("400 40px 'Bebas Neue'"),
+    ]);
+  } catch {
+    /* The canvas falls back to system sans when a font is missing. */
+  }
+  render();
+  document.fonts.ready.then(() => render()).catch(() => {});
+}
+
+bootStudio();

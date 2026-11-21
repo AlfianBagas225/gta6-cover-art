@@ -1,135 +1,133 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Palm Sunset Cover Studio — make GTA 6-style multi-panel cover art from your photos, offline in your browser.">
-<title>Palm Sunset Cover Studio · GTA-style cover maker</title>
-<link rel="stylesheet" href="./style.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Palm Sunset Cover Studio</title>
+  <meta name="description" content="Turn any photo and a caption into GTA 6-style cover art, offline in your browser. Seven layouts, six grades, one-click PNG export.">
+  <link rel="stylesheet" href="./style.css">
 </head>
 <body>
-<header class="masthead">
-  <div>
-    <h1>Palm Sunset Cover Studio</h1>
-    <p>Your photo, seven poster layouts, six colour grades — a shareable cover in under a minute.</p>
-  </div>
-  <div class="masthead-actions">
-    <button id="randomizeBtn" type="button" class="randomize-btn" title="Randomize layout, grade, title spot, title font and caption (or press R)">🎲 Randomize</button>
-    <button id="resetBtn" type="button" title="Back to the opening cover">↺ Reset</button>
-    <button id="undoBtn" type="button" title="Undo (Ctrl+Z)">↩ Undo</button>
-    <button id="redoBtn" type="button" title="Redo (Ctrl+Y)">↪ Redo</button>
-  </div>
-</header>
-<main class="app">
-  <aside class="panel">
-    <section>
-      <h2>1 · Photos</h2>
-      <p class="section-hint">Your pictures stay on this machine — pick a thumbnail to fill the selected panel.</p>
-      <label class="upload-box">Add your photos
-        <input id="photoInput" type="file" accept="image/*" multiple>
-      </label>
-      <div class="row">
-        <button id="loadSamplesBtn" type="button">Load sample photos</button>
-        <button id="fillAllBtn" type="button" title="Fill every panel with the selected panel's photo">Fill all panels</button>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">PS</span>
+      <div class="brand-text">
+        <h1>Palm Sunset <span>Cover Studio</span></h1>
+        <p>Turn any photo into GTA 6-style cover art — offline, on your machine.</p>
       </div>
-      <div id="photoStrip" class="strip" aria-label="Photo library"></div>
-      <p class="note">Click a thumbnail to put that photo in the selected panel. Photos stay on your machine — nothing is uploaded.</p>
-    </section>
-    <section>
-      <h2>2 · Layout — panel arrangement</h2>
-      <p class="section-hint">Seven ways to arrange the panels. The purple tile is where the title sits — Neon Grid slots it into the middle row. Press L to step through the layouts.</p>
-      <div id="layoutPicker" class="layout-grid" role="group" aria-label="Cover layout"></div>
-    </section>
-    <section>
-      <h2>3 · Grade — colour mood</h2>
-      <p class="section-hint">Six colour moods. VHS adds scanlines, a red/cyan split and tracking bands over the whole cover. Press G to step through the grades.</p>
-      <div id="gradePicker" class="grade-grid" role="group" aria-label="Colour grade"></div>
-    </section>
-    <section>
-      <h2>4 · Selected panel — zoom &amp; position</h2>
-      <p class="section-hint">Frame the photo in the panel you clicked. Drag it on the cover, or use the sliders below.</p>
-      <p id="panelInfo" class="panel-info">Panel 1 of 4</p>
-      <label>Zoom <input id="zoomSlider" type="range" min="1" max="3" step="0.01" value="1.12"></label>
-      <label>Move sideways <input id="panXSlider" type="range" min="-0.5" max="0.5" step="0.01" value="0"></label>
-      <label>Move up / down <input id="panYSlider" type="range" min="-0.5" max="0.5" step="0.01" value="0"></label>
-      <div class="row">
-        <button id="cyclePhotoBtn" type="button" title="Show the next photo in the selected panel">Next photo in panel</button>
+    </div>
+    <div class="top-actions">
+      <button id="randomizeBtn" type="button" class="btn btn-ghost" title="Random layout, grade and photos (R)">Randomize <kbd>R</kbd></button>
+      <button id="resetBtn" type="button" class="btn btn-ghost" title="Back to the opening state">Reset</button>
+      <button id="exportBtn" type="button" class="btn btn-primary" title="Export the current cover as a PNG">Export PNG</button>
+    </div>
+  </header>
+
+  <main class="studio">
+    <section class="stage" aria-label="Cover preview">
+      <div class="canvas-wrap">
+        <canvas id="coverCanvas" width="1080" height="1350"></canvas>
       </div>
-      <p class="note">Or drag the panel right on the cover, and scroll over it to zoom. Shift-click a second panel to swap the two photos.</p>
+      <div class="panel-strip" id="panelStrip" role="group" aria-label="Panels"></div>
+      <p class="hint">Drag a photo to pan it · Scroll to zoom · Shift-click two panels to swap their photos · <kbd>R</kbd> randomise · <kbd>G</kbd> grade · <kbd>L</kbd> layout · <kbd>1–7</kbd> layouts · Arrow keys nudge</p>
     </section>
-    <section>
-      <h2>5 · Caption — title &amp; subtitle</h2>
-      <p class="section-hint">Short titles read best at 300 px wide — the title opens large and the subtitle carries an outline.</p>
-      <label>Title <input id="titleInput" type="text" maxlength="32" value="NEON SHORE"></label>
-      <label>Subtitle <input id="subtitleInput" type="text" maxlength="48" value="a vice coast story"></label>
-      <div class="row">
-        <label>Title font
-          <select id="titleFace">
-            <option value="anton">Anton — heavy poster</option>
-            <option value="bebas">Bebas Neue — tall caps</option>
-          </select>
-        </label>
-        <label>Title fill
-          <select id="titleStyle">
-            <option value="gradient">Sunset gradient</option>
-            <option value="solid">Solid white</option>
-            <option value="outline">Outline only</option>
-          </select>
-        </label>
-        <label>Title spot
-          <select id="titleSpot">
-            <option value="bottom">Bottom</option>
-            <option value="top">Top</option>
-            <option value="center">Centre</option>
-          </select>
-        </label>
-      </div>
-      <label class="toggle"><input id="titleSunset" type="checkbox" checked> Sunset-gradient title</label>
-    </section>
-    <section>
-      <h2>6 · Finish — frames &amp; effects</h2>
-      <p class="section-hint">Frames, grain and the badge — toggle what the cover wears.</p>
-      <div class="control-subgroup">
-        <h3>Look</h3>
-        <div class="toggles">
-          <label class="toggle"><input id="showFrames" type="checkbox" checked> White panel frames</label>
-          <label class="toggle"><input id="showGrain" type="checkbox" checked> Film grain</label>
-          <label class="toggle"><input id="showVignette" type="checkbox" checked> Vignette</label>
+
+    <aside class="editor" aria-label="Cover editor">
+      <section class="group">
+        <div class="group-head">
+          <h2>Layout</h2>
+          <div class="stepper">
+            <button id="layoutPrev" type="button" aria-label="Previous layout">‹</button>
+            <button id="layoutNext" type="button" aria-label="Next layout">›</button>
+          </div>
         </div>
-      </div>
-      <div class="control-subgroup">
-        <h3>Corners</h3>
-        <div class="toggles">
-          <label class="toggle"><input id="showBadge" type="checkbox" checked> Vice Coast badge</label>
-          <label>Stars
-            <select id="starCount">
-              <option value="5" selected>★★★★★</option>
-              <option value="4">★★★★☆</option>
-              <option value="3">★★★☆☆</option>
-              <option value="0">No stars</option>
-            </select>
-          </label>
+        <p class="group-name" id="layoutName">Classic</p>
+        <p class="group-blurb" id="layoutBlurb">One hero photo, full bleed, title over a dusk scrim.</p>
+        <div class="dots" id="layoutDots" role="group" aria-label="Choose a layout">
+          <button type="button" title="Classic">1</button>
+          <button type="button" title="Duo">2</button>
+          <button type="button" title="Trio">3</button>
+          <button type="button" title="Grid">4</button>
+          <button type="button" title="Split">5</button>
+          <button type="button" title="Diagonal">6</button>
+          <button type="button" title="Neon Grid">7</button>
         </div>
-      </div>
-    </section>
-    <section>
-      <h2>7 · Export — save as PNG</h2>
-      <p class="section-hint">Three post sizes, straight to your downloads. The preview is exactly what gets exported.</p>
-      <div id="sizePicker" class="size-list" role="group" aria-label="Export size"></div>
-      <div class="row">
-        <button id="exportBtn" type="button" class="accent-btn">Export PNG</button>
-        <button id="exportAllBtn" type="button">Export all 3 sizes</button>
-      </div>
-      <p id="notice" role="status"></p>
-      <p class="legal">Lettering: Anton, Pacifico &amp; Bebas Neue (SIL Open Font License, under app/fonts/). All art is original — no Rockstar logo, artwork or font.</p>
-    </section>
-  </aside>
-  <section class="preview">
-    <canvas id="previewCanvas" width="1080" height="1080" aria-label="Live cover preview"></canvas>
-    <p id="coverSummary" class="cover-summary" role="status"></p>
-    <p class="note">Live preview — click a panel to select it, drag to move the photo, scroll to zoom, Shift-click another panel to swap photos.</p>
-  </section>
-</main>
-<script type="module" src="./src/main.js"></script>
+        <p class="keys">Press <kbd>L</kbd> to step, <kbd>1–7</kbd> to jump.</p>
+      </section>
+
+      <section class="group">
+        <div class="group-head">
+          <h2>Grade</h2>
+          <div class="stepper">
+            <button id="gradePrev" type="button" aria-label="Previous grade">‹</button>
+            <button id="gradeNext" type="button" aria-label="Next grade">›</button>
+          </div>
+        </div>
+        <p class="group-name" id="gradeName">Sunset</p>
+        <p class="group-blurb" id="gradeBlurb">Warm golden hour: amber highlights, rose shadows.</p>
+        <div class="swatches" id="gradeSwatches" role="group" aria-label="Choose a grade">
+          <button type="button" class="sw-sunset" title="Sunset">Sunset</button>
+          <button type="button" class="sw-vice" title="Vice">Vice</button>
+          <button type="button" class="sw-noir" title="Noir">Noir</button>
+          <button type="button" class="sw-pastel" title="Pastel">Pastel</button>
+          <button type="button" class="sw-mono" title="Mono">Mono</button>
+          <button type="button" class="sw-vhs" title="VHS">VHS</button>
+        </div>
+        <p class="keys">Press <kbd>G</kbd> to step through the grades.</p>
+      </section>
+
+      <section class="group">
+        <div class="group-head">
+          <h2>Caption</h2>
+        </div>
+        <label class="field">
+          <span>Title</span>
+          <input id="titleInput" type="text" value="PALM SUNSET" maxlength="24" autocomplete="off">
+        </label>
+        <label class="field">
+          <span>Subtitle</span>
+          <input id="subtitleInput" type="text" value="Neon Shore" maxlength="32" autocomplete="off">
+        </label>
+        <div class="segmented" role="group" aria-label="Title fill style">
+          <button type="button" data-fill="solid">Solid</button>
+          <button type="button" data-fill="gradient" class="active">Gradient</button>
+          <button type="button" data-fill="outline">Outline</button>
+        </div>
+      </section>
+
+      <section class="group">
+        <div class="group-head">
+          <h2>Photo</h2>
+        </div>
+        <p class="group-name" id="photoLabel">Panel 1 · boulevard</p>
+        <p class="group-blurb" id="zoomLabel">100% zoom</p>
+        <div class="row">
+          <button id="nextPhotoBtn" type="button" class="btn btn-ghost">Next photo</button>
+          <button id="uploadBtn" type="button" class="btn btn-ghost">Upload your own</button>
+        </div>
+        <p class="keys">Your photos never leave this machine — they are read in the browser only.</p>
+      </section>
+
+      <section class="group">
+        <div class="group-head">
+          <h2>Export</h2>
+        </div>
+        <div class="segmented" role="group" aria-label="Export size">
+          <button type="button" data-size="square">Square</button>
+          <button type="button" data-size="portrait" class="active">Portrait</button>
+          <button type="button" data-size="landscape">Landscape</button>
+        </div>
+        <p class="file-name" id="fileNamePreview">palm-sunset-cover_palm-sunset_classic_sunset_portrait.png</p>
+        <p class="keys">Square 1080 × 1080 · Portrait 1080 × 1350 · Landscape 1920 × 1080. The file name carries the layout and grade.</p>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="foot">
+    <p>Offline by design — no uploads, no accounts, no watermarks. Lettering in Anton, Bebas Neue &amp; Pacifico (SIL Open Font License). All art is the studio's own: no Rockstar Games logo, artwork or fonts.</p>
+  </footer>
+
+  <input id="uploadInput" type="file" accept="image/*" hidden>
+  <script type="module" src="./src/main.js"></script>
 </body>
 </html>

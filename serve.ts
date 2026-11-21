@@ -1,91 +1,126 @@
-// A tiny static server for app/ (Node 22, standard library only), so the
-// cover maker can be tried locally without a build step: `node serve.ts`
-// serves app/ on http://localhost:8080 (or --port <n>). It sends the MIME
-// types an offline web app needs — HTML, modules, CSS, sample photos and
-// the vendored TTF fonts — refuses any path outside app/, and otherwise
-// does nothing clever: a development convenience, not a web server for the
-// internet. Palm Sunset Cover Studio's editor loads its fonts and samples
-// from these same routes, so a 404 here shows up at once as a missing font
-// or a blank panel while testing.
-import { createReadStream, statSync } from 'node:fs';
-import { createServer } from 'node:http';
-import { extname, join, normalize, relative, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+/**
+ * Palm Sunset Cover Studio — dev server (serve.ts).
+ *
+ * Serves the app/ directory over plain HTTP so a desktop browser can open
+ * app/index.html, load its vendored fonts and sample photos, and export
+ * covers — all offline, no network request leaves the machine. This server
+ * is a development convenience only: the handed-in app is static files, and
+ * any static file server (or the competition's own hosting) serves it the
+ * same way.
+ *
+ *   node serve.ts            # serves http://127.0.0.1:8137/
+ *   PORT=8080 node serve.ts  # pick another port
+ *
+ * The server only ever reads files under app/. A request that climbs out of
+ * app/ (../ and friends) gets a 403 instead of a file.
+ */
 
-const appRoot = resolve(fileURLToPath(new URL('./app', import.meta.url)));
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { existsSync, lstatSync, readFileSync } from "node:fs";
+import { dirname, extname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const TYPES = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.avif': 'image/avif',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-  '.woff2': 'font/woff2',
-  '.woff': 'font/woff',
-  '.ttf': 'font/ttf',
-  '.otf': 'font/otf',
-  '.bin': 'application/octet-stream',
-  '.wasm': 'application/wasm',
-  '.wav': 'audio/wav',
-  '.mp3': 'audio/mpeg',
-  '.ogg': 'audio/ogg',
-  '.txt': 'text/plain; charset=utf-8',
+/** The port, from $PORT when set, else the studio's own default. */
+const LISTEN_PORT = Number.parseInt(process.env.PORT ?? "8137", 10) || 8137;
+
+/** The directory this file lives in is the repository root. */
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)));
+
+/** The only directory this server will ever read from. */
+const APP_ROOT = join(REPO_ROOT, "app");
+
+/** Content types for the file kinds the app serves. */
+const MIME_BY_EXTENSION: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".svg": "image/svg+xml",
+  ".ttf": "font/ttf",
+  ".otf": "font/otf",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".txt": "text/plain; charset=utf-8",
 };
 
-/** Resolves a request path inside app/, or null when it escapes the root. */
-function resolveInApp(pathname) {
-  const candidate = resolve(join(appRoot, normalize(pathname)));
-  if (candidate === appRoot) return candidate;
-  return candidate.startsWith(appRoot + sep) ? candidate : null;
+/** Fallback content type for anything the table does not name. */
+const FALLBACK_MIME = "application/octet-stream";
+
+/** Look up the content type for a file path, falling back to octet-stream. */
+function mimeFor(path: string): string {
+  return MIME_BY_EXTENSION[extname(path).toLowerCase()] ?? FALLBACK_MIME;
 }
 
-function pickPort() {
-  const flag = process.argv.indexOf('--port');
-  const wanted = flag === -1 ? 8080 : Number(process.argv[flag + 1]);
-  return Number.isInteger(wanted) && wanted > 0 && wanted < 65536 ? wanted : 8080;
+/**
+ * Resolve a request path to a file under app/, or null when the request is
+ * not a file we serve. "/" maps to index.html; a directory maps to its own
+ * index.html; anything climbing out of app/ is refused.
+ */
+function resolveRequestPath(requestPath: string): string | null {
+  const clean = requestPath.split("?")[0]?.split("#")[0] ?? "/";
+  const decoded = decodeURIComponent(clean);
+  const joined = resolve(APP_ROOT, `.${sep}${decoded}`);
+  if (joined !== APP_ROOT && !joined.startsWith(`${APP_ROOT}${sep}`)) return null;
+  if (existsSync(joined) && lstatSync(joined).isDirectory()) {
+    const index = join(joined, "index.html");
+    return existsSync(index) ? index : null;
+  }
+  return existsSync(joined) && lstatSync(joined).isFile() ? joined : null;
 }
 
-const server = createServer((request, response) => {
-  const url = new URL(request.url ?? '/', 'http://localhost');
-  let pathname;
-  try {
-    pathname = decodeURIComponent(url.pathname);
-  } catch {
-    response.writeHead(400).end('bad request');
+/** One-line access log: method, path, status, bytes. */
+function logAccess(method: string, path: string, status: number, bytes: number): void {
+  const stamp = new Date().toISOString().slice(11, 19);
+  console.log(`${stamp} ${method} ${path} -> ${status} (${bytes} B)`);
+}
+
+/** Answer one request: the file, or a short plain-text error. */
+function handleRequest(req: IncomingMessage, res: ServerResponse): void {
+  const method = req.method ?? "GET";
+  const rawPath = req.url ?? "/";
+  if (method !== "GET" && method !== "HEAD") {
+    res.writeHead(405, { "content-type": "text/plain; charset=utf-8" });
+    res.end("method not allowed\n");
+    logAccess(method, rawPath, 405, 0);
     return;
   }
-  if (pathname.endsWith('/')) pathname += 'index.html';
-  const file = resolveInApp(pathname);
+  const file = resolveRequestPath(rawPath);
   if (file === null) {
-    response.writeHead(403).end('forbidden');
+    const body = "not found\n";
+    res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+    res.end(body);
+    logAccess(method, rawPath, 404, body.length);
     return;
   }
-  let size;
-  try {
-    const stats = statSync(file);
-    if (!stats.isFile()) throw new Error('not a file');
-    size = stats.size;
-  } catch {
-    response.writeHead(404).end('not found');
-    return;
-  }
-  const rel = relative(appRoot, file);
-  response.writeHead(200, {
-    'content-type': TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream',
-    'content-length': size,
-    'cache-control': 'no-store',
+  const body = readFileSync(file);
+  res.writeHead(200, {
+    "content-type": mimeFor(file),
+    "content-length": body.length,
+    "cache-control": "no-store",
   });
-  createReadStream(join(appRoot, rel)).pipe(response);
-});
+  res.end(method === "HEAD" ? undefined : body);
+  logAccess(method, rawPath, 200, body.length);
+}
 
-server.listen(pickPort(), '127.0.0.1', () => {
-  console.log(`app/ is on http://localhost:${pickPort()}`);
-});
+/** Start listening and print the address to open. */
+function startServer(): void {
+  const server = createServer(handleRequest);
+  server.on("error", (err: Error) => {
+    console.error(`serve.ts: cannot listen on port ${LISTEN_PORT}: ${err.message}`);
+    process.exit(1);
+  });
+  server.listen(LISTEN_PORT, "127.0.0.1", () => {
+    console.log(`Palm Sunset Cover Studio — dev server`);
+    console.log(`  app:   http://127.0.0.1:${LISTEN_PORT}/`);
+    console.log(`  shots: http://127.0.0.1:${LISTEN_PORT}/?shot=cover-landscape`);
+    console.log(`  stop:  Ctrl+C`);
+  });
+}
+
+startServer();
